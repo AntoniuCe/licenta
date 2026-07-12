@@ -1,2 +1,0 @@
-# licenta
-Codul pentru licenta
