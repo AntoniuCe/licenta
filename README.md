@@ -1,0 +1,2 @@
+# licenta
+My thesis project
