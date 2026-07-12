@@ -1,0 +1,104 @@
+# ── Backend Deployment ────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: ecommerce
+  labels:
+    app: backend
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: backend
+  # RollingUpdate: replace pods one at a time — zero downtime deploys
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app: backend
+    spec:
+      # One backend pod per Pi — if a Pi dies, its pod is rescheduled to survivors
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: backend
+
+      containers:
+        - name: backend
+          # Replace with your actual registry image path
+          image: 
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+
+          # All values from 03-secrets/secrets.yaml become env vars.
+          # This maps to what your database.go and config.go read.
+          envFrom:
+            - secretRef:
+                name: backend-secrets
+
+          # Longhorn shared volume mounted at /app/uploads
+          # Your product_handler.go saves files via c.SaveUploadedFile() to this path.
+          # Because it's a shared Longhorn volume, ALL backend pods see the same files.
+          volumeMounts:
+            - name: uploads
+              mountPath: /app/uploads
+
+          # Liveness: if /api/products stops responding, restart the pod
+          livenessProbe:
+            httpGet:
+              path: /api/products
+              port: 8080
+            initialDelaySeconds: 20
+            periodSeconds: 30
+            failureThreshold: 3
+
+          # Readiness: don't route traffic to this pod until DB is connected.
+          # This is critical during failover — the pod won't get traffic
+          # until AutoMigrate has finished and the DB is reachable.
+          readinessProbe:
+            httpGet:
+              path: /api/products
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 3
+
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+
+      volumes:
+        - name: uploads
+          persistentVolumeClaim:
+            claimName: uploads-pvc
+
+---
+# ── Backend Service ───────────────────────────────────────────────────────
+# ClusterIP — only reachable inside the cluster.
+# Traefik (ingress) routes external traffic at api.store.local to this service.
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend-svc
+  namespace: ecommerce
+spec:
+  selector:
+    app: backend
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+  type: ClusterIP

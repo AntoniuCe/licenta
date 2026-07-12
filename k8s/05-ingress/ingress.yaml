@@ -1,0 +1,39 @@
+# ── Traefik Ingress ───────────────────────────────────────────────────────
+# Traefik is pre-installed by k3s. It reads these rules and routes
+# incoming requests by the Host header.
+#
+# Pi-hole DNS maps BOTH hostnames to the single MetalLB IP on your LAN.
+# Traefik then routes by Host header:
+#   store.local     -> frontend-svc (React app)
+#   api.store.local -> backend-svc  (Go API + /uploads static files)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ecommerce-ingress
+  namespace: ecommerce
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: store.antoniu.xyz
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend-svc
+                port:
+                  number: 80
+
+    - host: api.antoniu.xyz
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: backend-svc
+                port:
+                  number: 8080

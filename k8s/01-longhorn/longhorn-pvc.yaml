@@ -1,0 +1,16 @@
+# PersistentVolumeClaim for product image uploads.
+# Longhorn replicates this volume across all 3 Pi nodes automatically.
+# When a node dies the volume degrades to fewer replicas but stays accessible.
+# When the node returns, Longhorn re-syncs automatically — no manual action needed.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: uploads-pvc
+  namespace: ecommerce
+spec:
+  accessModes:
+    - ReadWriteMany      # all backend replicas mount the same volume simultaneously
+  storageClassName: longhorn
+  resources:
+    requests:
+      storage: 5Gi

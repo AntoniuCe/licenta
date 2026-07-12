@@ -1,2 +1,2 @@
 # licenta
-My thesis project
+Codul pentru licenta

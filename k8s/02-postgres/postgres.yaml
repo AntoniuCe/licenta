@@ -1,0 +1,74 @@
+# CloudNativePG HA Cluster — 3 Postgres instances (1 primary + 2 replicas)
+# One instance is scheduled per Pi node via topologySpreadConstraints.
+#
+# Failover behaviour when a Pi goes down:
+#   - CNPG detects the primary is gone (health-check timeout ~30s)
+#   - The operator promotes a replica to primary automatically
+#   - A new Service endpoint (ecommerce-pg-rw) is updated to point at the new primary
+#   - Your Go API reconnects on the next retry — no code changes needed
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: ecommerce-pg
+  namespace: ecommerce
+spec:
+  instances: 3
+
+  imageName: ghcr.io/cloudnative-pg/postgresql:15
+
+  # Prefer one Postgres pod per physical Pi node, but don't refuse to
+  # schedule if a node (e.g. pi-3) is down. ScheduleAnyway keeps the even
+  # spread as a *preference* — the scheduler still tries to place instances
+  # on separate nodes when all 3 are healthy — but falls back to packing
+  # instances onto fewer nodes rather than leaving a replica Pending
+  # forever when one node is unreachable. Same fix as backend.yaml/frontend.yaml.
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: kubernetes.io/hostname
+      whenUnsatisfiable: ScheduleAnyway
+      labelSelector:
+        matchLabels:
+          cnpg.io/cluster: ecommerce-pg
+
+  postgresql:
+    parameters:
+      max_connections: "100"
+      shared_buffers: "128MB"   # conservative — Pi 4 has 1–8 GB depending on model
+      work_mem: "4MB"
+      wal_level: "replica"
+
+  storage:
+    size: 10Gi
+    storageClass: longhorn
+
+  bootstrap:
+    initdb:
+      database: ecommerce
+      owner: postgres
+      secret:
+        name: postgres-credentials   # see 03-secrets/secrets.yaml
+
+  # Declarative role management for the APPLICATION role only.
+  # Note: "postgres" itself cannot go here — CNPG reserves it for operator
+  # use and rejects it with "This role is reserved for operator use".
+  # Superuser password drift must still be fixed manually via:
+  #   kubectl exec -it ecommerce-pg-1 -n ecommerce -- \
+  #     psql -U postgres -d ecommerce -c "ALTER USER postgres WITH PASSWORD '...';"
+  #
+  # This role, however, IS continuously reconciled by the operator — if its
+  # password ever drifts from ecommerce-app-credentials, CNPG corrects it
+  # automatically on the next reconcile loop. Your backend should connect
+  # using this role instead of postgres (see backend-secrets DB_USER/DB_PASSWORD).
+  managed:
+    roles:
+      - name: ecommerce_app
+        ensure: present
+        login: true
+        superuser: false
+        passwordSecret:
+          name: ecommerce-app-credentials
+
+  # Go API connection strings:
+  #   Primary (read+write): ecommerce-pg-rw.ecommerce.svc.cluster.local:5432
+  #   Replica (read-only):  ecommerce-pg-ro.ecommerce.svc.cluster.local:5432
+  #   Any instance:         ecommerce-pg-r.ecommerce.svc.cluster.local:5432

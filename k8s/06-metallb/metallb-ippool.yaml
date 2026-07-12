@@ -1,0 +1,25 @@
+# MetalLB gives your cluster a real LAN IP for external services.
+# Without this, LoadBalancer services stay in <pending> forever on bare-metal.
+#
+# HOW TO CHOOSE YOUR IP RANGE:
+#   1. Check your router's DHCP pool (e.g. 192.168.1.100 - 192.168.1.199)
+#   2. Pick IPs OUTSIDE that range so the router never hands them to other devices
+#   3. Example: if router DHCP ends at .199, use .200-.210
+#   4. Update Pi-hole DNS: store.local -> first IP in this range (e.g. 192.168.1.200)
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: local-pool
+  namespace: metallb-system
+spec:
+  addresses:
+    - 192.168.1.200-192.168.1.210   # <-- CHANGE to match your subnet
+---
+apiVersion: metallb.io/v1beta1
+kind: L2Advertisement
+metadata:
+  name: local-l2
+  namespace: metallb-system
+spec:
+  ipAddressPools:
+    - local-pool
